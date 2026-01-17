@@ -12,7 +12,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     useEffect(() => {
         // In production, this URL should come from env vars
-        const newSocket = io('http://localhost:3000');
+        const newSocket = io(import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000');
         setSocket(newSocket);
 
         return () => {
