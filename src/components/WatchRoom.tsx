@@ -13,7 +13,10 @@ import {
   AlertCircle,
   Info,
   Users,
-  ArrowLeft
+  ArrowLeft,
+  Sparkles,
+  Zap,
+  Heart
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -36,7 +39,6 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
   const [participantConnected, setParticipantConnected] = useState(false);
   const [myId] = useState(() => uuidv4());
 
-  // Initialize camera/mic
   useEffect(() => {
     const initMedia = async () => {
       try {
@@ -46,7 +48,7 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
         });
         setLocalStream(stream);
         toast({
-          title: 'Camera ready',
+          title: '✨ Camera ready',
           description: 'Your camera and microphone are connected.'
         });
       } catch (err) {
@@ -66,14 +68,12 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
     };
   }, []);
 
-  // Simulate participant connection after delay (demo mode)
   useEffect(() => {
     const timeout = setTimeout(() => {
       if (!participantConnected) {
-        // In a real app, this would come from WebRTC
         setParticipantConnected(true);
         toast({
-          title: 'Friend connected!',
+          title: '🎉 Friend connected!',
           description: 'Your watch party is ready to start.'
         });
       }
@@ -112,7 +112,7 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
       try {
         const stream = await navigator.mediaDevices.getDisplayMedia({
           video: true,
-          audio: true // Capture tab audio if available
+          audio: true
         });
         
         stream.getVideoTracks()[0].onended = () => {
@@ -123,14 +123,14 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
         setScreenStream(stream);
         setIsScreenSharing(true);
         toast({
-          title: 'Screen sharing started',
-          description: 'Your friend can now see your screen. Open your movie in another tab!'
+          title: '🖥️ Screen sharing started',
+          description: 'Your friend can now see your screen!'
         });
       } catch (err) {
         console.error('Failed to share screen:', err);
         toast({
           title: 'Screen share failed',
-          description: 'Could not start screen sharing. Please try again.',
+          description: 'Could not start screen sharing.',
           variant: 'destructive'
         });
       }
@@ -155,38 +155,55 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Background effects */}
+      <div className="fixed inset-0 bg-[radial-gradient(ellipse_at_top_left,hsl(var(--primary)/0.08),transparent_50%)] pointer-events-none" />
+      <div className="fixed inset-0 bg-[radial-gradient(ellipse_at_bottom_right,hsl(var(--chart-1)/0.05),transparent_50%)] pointer-events-none" />
+      
       {/* Header */}
-      <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur">
-        <div className="container flex h-16 items-center justify-between px-4">
+      <header className="sticky top-0 z-40 border-b border-border/50 glass">
+        <div className="container flex h-18 items-center justify-between px-4">
           <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={handleEndCall}>
+            <Button variant="ghost" size="icon" onClick={handleEndCall} className="rounded-xl hover:bg-destructive/10 hover:text-destructive">
               <ArrowLeft className="w-5 h-5" />
             </Button>
             <div>
-              <h1 className="text-lg font-semibold">Watch Party</h1>
               <div className="flex items-center gap-2">
-                <button
-                  onClick={handleCopyCode}
-                  className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <span className="font-mono">{roomId}</span>
-                  {copied ? (
-                    <Check className="w-3 h-3 text-chart-1" />
-                  ) : (
-                    <Copy className="w-3 h-3" />
-                  )}
-                </button>
+                <h1 className="text-lg font-bold gradient-text">Watch Party</h1>
+                <Heart className="w-4 h-4 text-primary animate-pulse" />
               </div>
+              <button
+                onClick={handleCopyCode}
+                className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors group"
+              >
+                <span className="font-mono tracking-wider">{roomId}</span>
+                {copied ? (
+                  <Check className="w-4 h-4 text-emerald-500" />
+                ) : (
+                  <Copy className="w-4 h-4 opacity-50 group-hover:opacity-100" />
+                )}
+              </button>
             </div>
           </div>
           
           <div className="flex items-center gap-3">
-            <Badge variant={isHost ? 'default' : 'secondary'}>
+            <Badge 
+              variant={isHost ? 'default' : 'secondary'}
+              className={cn(
+                'rounded-lg px-3 py-1',
+                isHost && 'animate-pulse-glow'
+              )}
+            >
+              <Sparkles className="w-3 h-3 mr-1" />
               {isHost ? 'Host' : 'Guest'}
             </Badge>
-            <div className="flex items-center gap-1 text-sm text-muted-foreground">
-              <Users className="w-4 h-4" />
-              <span>{participantConnected ? '2' : '1'}</span>
+            <div className="flex items-center gap-2 px-3 py-1.5 glass rounded-lg">
+              <Users className="w-4 h-4 text-muted-foreground" />
+              <span className={cn(
+                'font-medium',
+                participantConnected ? 'text-emerald-500' : 'text-muted-foreground'
+              )}>
+                {participantConnected ? '2' : '1'}
+              </span>
             </div>
           </div>
         </div>
@@ -195,16 +212,19 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
       {/* Main content */}
       <main className="container p-4 space-y-4">
         {/* Info banner */}
-        <Card className="border-primary/20 bg-primary/5">
-          <CardContent className="flex items-start gap-3 py-3">
-            <Info className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+        <Card className="glass border-primary/20 overflow-hidden animate-fade-in">
+          <div className="absolute inset-0 bg-gradient-to-r from-primary/5 to-transparent pointer-events-none" />
+          <CardContent className="flex items-start gap-4 py-4 relative">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+              <Info className="w-5 h-5 text-primary" />
+            </div>
             <div className="text-sm">
-              <p className="font-medium text-foreground">How to watch together:</p>
-              <ol className="list-decimal list-inside text-muted-foreground space-y-1 mt-1">
-                <li>Open your movie in a new browser tab (e.g., Netmirror)</li>
-                <li>Click "Share Screen" below and select the movie tab</li>
-                <li>Enable "Share tab audio" for synchronized audio</li>
-                <li>Your friend will see and hear everything in sync!</li>
+              <p className="font-semibold text-foreground mb-2">How to watch together:</p>
+              <ol className="list-decimal list-inside text-muted-foreground space-y-1">
+                <li>Open your movie in a <span className="text-foreground font-medium">new browser tab</span></li>
+                <li>Click <span className="text-primary font-medium">"Share Screen"</span> and select the movie tab</li>
+                <li>Enable <span className="text-foreground font-medium">"Share tab audio"</span> for synchronized audio</li>
+                <li>Your friend will see and hear everything in sync! 🎬</li>
               </ol>
             </div>
           </CardContent>
@@ -212,10 +232,10 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
 
         <div className="grid lg:grid-cols-3 gap-4">
           {/* Video area */}
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-2 animate-fade-in-up stagger-1">
             <VideoCall
               localStream={localStream}
-              remoteStream={participantConnected ? localStream : null} // Demo: mirror local stream
+              remoteStream={participantConnected ? localStream : null}
               screenStream={screenStream}
               isScreenSharing={isScreenSharing}
               onToggleVideo={handleToggleVideo}
@@ -229,41 +249,50 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
           </div>
 
           {/* Sidebar */}
-          <div className="space-y-4">
+          <div className="space-y-4 animate-fade-in-up stagger-2">
             {/* UNO Game Toggle */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Gamepad2 className="w-5 h-5 text-primary" />
+            <Card className="glass-strong border-0 shadow-xl overflow-hidden group hover-lift">
+              <div className="absolute inset-0 bg-gradient-to-br from-chart-2/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+              <CardHeader className="pb-3 relative">
+                <CardTitle className="flex items-center gap-3 text-base">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-chart-2/20 to-chart-2/5 flex items-center justify-center">
+                    <Gamepad2 className="w-5 h-5 text-chart-2" />
+                  </div>
                   Mini Games
                 </CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="relative">
                 <Button
                   onClick={() => setShowUnoGame(!showUnoGame)}
                   variant={showUnoGame ? 'default' : 'outline'}
-                  className="w-full"
+                  className={cn(
+                    'w-full rounded-xl transition-all',
+                    showUnoGame && 'animate-pulse-glow'
+                  )}
                 >
+                  <Zap className="w-4 h-4 mr-2" />
                   {showUnoGame ? 'Hide UNO' : 'Play UNO'}
                 </Button>
               </CardContent>
             </Card>
 
             {/* Connection status */}
-            <Card>
+            <Card className="glass-strong border-0 shadow-xl">
               <CardContent className="py-4">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-4">
                   <div className={cn(
-                    'w-3 h-3 rounded-full',
-                    participantConnected ? 'bg-chart-1' : 'bg-muted animate-pulse'
+                    'w-4 h-4 rounded-full transition-all duration-500',
+                    participantConnected 
+                      ? 'bg-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.5)]' 
+                      : 'bg-muted animate-pulse'
                   )} />
                   <div>
-                    <p className="font-medium text-sm">
+                    <p className="font-semibold">
                       {participantConnected ? 'Connected' : 'Waiting for friend...'}
                     </p>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-sm text-muted-foreground">
                       {participantConnected 
-                        ? 'Your watch party is live!'
+                        ? '✨ Your watch party is live!'
                         : 'Share the room code with your friend'
                       }
                     </p>
@@ -273,12 +302,12 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
             </Card>
 
             {/* Legal notice */}
-            <Card className="border-destructive/20">
-              <CardContent className="flex items-start gap-2 py-3">
-                <AlertCircle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
-                <p className="text-xs text-muted-foreground">
+            <Card className="glass border-destructive/20">
+              <CardContent className="flex items-start gap-3 py-3">
+                <AlertCircle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
+                <p className="text-xs text-muted-foreground leading-relaxed">
                   Only share content you have the right to share. 
-                  Respect copyright and streaming service terms.
+                  Respect copyright and streaming service terms of use.
                 </p>
               </CardContent>
             </Card>
@@ -287,7 +316,7 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
 
         {/* UNO Game Overlay */}
         {showUnoGame && (
-          <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-background/90 backdrop-blur-xl flex items-center justify-center p-4 animate-fade-in">
             <UnoGame
               myId={myId}
               myName={userName}
