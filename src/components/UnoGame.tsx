@@ -7,10 +7,10 @@ import type { UnoGameState, UnoCard as UnoCardType, UnoColor } from '@/lib/types
 import { v4 as uuidv4 } from 'uuid';
 import { cn } from '@/lib/utils';
 import { RotateCcw, Layers, Sparkles, X, Trophy, Zap } from 'lucide-react';
-import { useSocket } from '@/context/SocketContext';
+import { useP2P } from '@/context/P2PContext';
 
 interface UnoGameProps {
-  roomId: string;
+  roomId: string; // This is actually the peer ID we are connected to/hosting
   myId: string;
   myName: string;
   opponentId: string;
@@ -18,8 +18,9 @@ interface UnoGameProps {
   onClose: () => void;
 }
 
-export function UnoGame({ roomId, myId, myName, opponentId, opponentName, onClose }: UnoGameProps) {
-  const socket = useSocket();
+export function UnoGame({ myId, myName, opponentId, opponentName, onClose }: UnoGameProps) {
+  const { sendMessage } = useP2P();
+
   const [gameState, setGameState] = useState<UnoGameState>(() =>
     initializeGame([myId, opponentId], [myName, opponentName], myId)
   );
@@ -35,22 +36,24 @@ export function UnoGame({ roomId, myId, myName, opponentId, opponentName, onClos
 
   // Sync state listener
   useEffect(() => {
-    if (!socket) return;
+    const handleData = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const data = customEvent.detail;
 
-    socket.on('game-state-update', (newState: UnoGameState) => {
-      setGameState(newState);
-    });
-
-    return () => {
-      socket.off('game-state-update');
+      if (data && data.type === 'GAME_STATE_UPDATE') {
+        setGameState(data.payload);
+      }
     };
-  }, [socket]);
+
+    window.addEventListener('p2p-data', handleData);
+    return () => {
+      window.removeEventListener('p2p-data', handleData);
+    };
+  }, []);
 
   const broadcastState = (newState: UnoGameState) => {
     setGameState(newState);
-    if (socket) {
-      socket.emit('game-state-update', { roomId, newState });
-    }
+    sendMessage({ type: 'GAME_STATE_UPDATE', payload: newState });
   };
 
   const handlePlayCard = (card: UnoCardType) => {
@@ -98,12 +101,6 @@ export function UnoGame({ roomId, myId, myName, opponentId, opponentName, onClos
       status = 'finished';
       winnerIs = current.players.find(p => p.id === current.currentPlayerId)?.name;
     }
-
-    // Handle Draw 2/4 effects?
-    // In a real game we would force opponent to draw. 
-    // For this "Cozy" version, we skip that complexity or trust manual drawing.
-    // But let's at least visually indicate it?
-    // For now, simple turn passing.
 
     return {
       ...current,

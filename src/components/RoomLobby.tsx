@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { v4 as uuidv4 } from 'uuid';
 import { Users, Video, Copy, Check, Sparkles, ArrowRight, Zap } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { useP2P } from '@/context/P2PContext';
 
 interface RoomLobbyProps {
   onJoinRoom: (roomId: string, userName: string, isHost: boolean) => void;
@@ -17,6 +18,8 @@ export function RoomLobby({ onJoinRoom }: RoomLobbyProps) {
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const { peerId } = useP2P();
+
   const handleCreateRoom = () => {
     if (!userName.trim()) {
       toast({
@@ -26,8 +29,15 @@ export function RoomLobby({ onJoinRoom }: RoomLobbyProps) {
       });
       return;
     }
-    const newRoomId = uuidv4().slice(0, 8).toUpperCase();
-    setGeneratedCode(newRoomId);
+    // In P2P, the room ID is the host's Peer ID
+    if (!peerId) {
+      toast({
+        title: 'Initializing...',
+        description: 'Please wait, connecting to peer server.',
+      });
+      return;
+    }
+    setGeneratedCode(peerId);
   };
 
   const handleStartRoom = () => {
@@ -53,7 +63,7 @@ export function RoomLobby({ onJoinRoom }: RoomLobbyProps) {
       });
       return;
     }
-    onJoinRoom(roomCode.toUpperCase(), userName, false);
+    onJoinRoom(roomCode.trim(), userName, false);
   };
 
   const handleCopyCode = () => {
@@ -74,7 +84,7 @@ export function RoomLobby({ onJoinRoom }: RoomLobbyProps) {
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,hsl(var(--primary)/0.1),transparent_50%)]" />
       <div className="absolute top-20 left-10 w-72 h-72 bg-primary/10 rounded-full blur-3xl animate-float" />
       <div className="absolute bottom-20 right-10 w-96 h-96 bg-chart-1/10 rounded-full blur-3xl animate-float-slow" />
-      
+
       <div className="relative w-full max-w-md space-y-6 z-10">
         {/* Header */}
         <div className="text-center space-y-4 opacity-0 animate-fade-in">
@@ -124,8 +134,8 @@ export function RoomLobby({ onJoinRoom }: RoomLobbyProps) {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="relative">
-                  <Button 
-                    onClick={handleCreateRoom} 
+                  <Button
+                    onClick={handleCreateRoom}
                     className="w-full h-14 text-lg rounded-xl group"
                     size="lg"
                   >
@@ -171,8 +181,8 @@ export function RoomLobby({ onJoinRoom }: RoomLobbyProps) {
                       maxLength={8}
                     />
                   </div>
-                  <Button 
-                    onClick={handleJoinRoom} 
+                  <Button
+                    onClick={handleJoinRoom}
                     variant="secondary"
                     className="w-full h-14 text-lg rounded-xl"
                     size="lg"
@@ -215,16 +225,16 @@ export function RoomLobby({ onJoinRoom }: RoomLobbyProps) {
                     )}
                   </Button>
                 </div>
-                <Button 
-                  onClick={handleStartRoom} 
+                <Button
+                  onClick={handleStartRoom}
                   className="w-full h-14 text-lg rounded-xl animate-pulse-glow"
                   size="lg"
                 >
                   Start Watch Party
                   <ArrowRight className="w-5 h-5 ml-2" />
                 </Button>
-                <Button 
-                  variant="ghost" 
+                <Button
+                  variant="ghost"
                   onClick={() => setGeneratedCode(null)}
                   className="w-full rounded-xl"
                 >
