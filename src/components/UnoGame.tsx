@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { UnoCard } from './UnoCard';
@@ -7,8 +7,10 @@ import type { UnoGameState, UnoCard as UnoCardType, UnoColor } from '@/lib/types
 import { v4 as uuidv4 } from 'uuid';
 import { cn } from '@/lib/utils';
 import { RotateCcw, Layers, Sparkles, X, Trophy, Zap } from 'lucide-react';
+import { useSocket } from '@/context/SocketContext';
 
 interface UnoGameProps {
+  roomId: string;
   myId: string;
   myName: string;
   opponentId: string;
@@ -16,20 +18,43 @@ interface UnoGameProps {
   onClose: () => void;
 }
 
-export function UnoGame({ myId, myName, opponentId, opponentName, onClose }: UnoGameProps) {
-  const [gameState, setGameState] = useState<UnoGameState>(() => 
+export function UnoGame({ roomId, myId, myName, opponentId, opponentName, onClose }: UnoGameProps) {
+  const socket = useSocket();
+  const [gameState, setGameState] = useState<UnoGameState>(() =>
     initializeGame([myId, opponentId], [myName, opponentName], myId)
   );
   const [selectedWildCard, setSelectedWildCard] = useState<string | null>(null);
   const [drawPile, setDrawPile] = useState<UnoCardType[]>(() => shuffleDeck(createDeck()));
 
+  // In shared state, find MY hand from the players array
+  const myPlayerIndex = gameState.players.findIndex(p => p.id === myId);
+  const myHand = gameState.players[myPlayerIndex]?.hand || [];
+  const opponent = gameState.players.find(p => p.id !== myId);
+
   const isMyTurn = gameState.currentPlayerId === myId;
-  const myPlayer = gameState.players.find(p => p.id === myId);
-  const opponent = gameState.players.find(p => p.id === opponentId);
+
+  // Sync state listener
+  useEffect(() => {
+    if (!socket) return;
+
+    socket.on('game-state-update', (newState: UnoGameState) => {
+      setGameState(newState);
+    });
+
+    return () => {
+      socket.off('game-state-update');
+    };
+  }, [socket]);
+
+  const broadcastState = (newState: UnoGameState) => {
+    setGameState(newState);
+    if (socket) {
+      socket.emit('game-state-update', { roomId, newState });
+    }
+  };
 
   const handlePlayCard = (card: UnoCardType) => {
     if (!isMyTurn) return;
-    
     if (!canPlayCard(card, gameState.topCard)) return;
 
     if (card.color === 'wild') {
@@ -41,52 +66,62 @@ export function UnoGame({ myId, myName, opponentId, opponentName, onClose }: Uno
   };
 
   const executePlayCard = (card: UnoCardType, chosenColor?: UnoColor) => {
-    setGameState(prev => {
-      const newHand = prev.myHand.filter(c => c.id !== card.id);
-      const playedCard = chosenColor ? { ...card, color: chosenColor } : card;
-      
-      let nextPlayerId = opponentId;
-      if (card.value === 'skip' || card.value === 'reverse') {
-        nextPlayerId = myId;
-      }
-
-      if (newHand.length === 0) {
-        return {
-          ...prev,
-          myHand: newHand,
-          topCard: playedCard,
-          gameStatus: 'finished',
-          winner: myName,
-          currentPlayerId: nextPlayerId,
-          players: prev.players.map(p => ({
-            ...p,
-            handCount: p.id === myId ? 0 : p.handCount,
-            isCurrentTurn: p.id === nextPlayerId
-          }))
-        };
-      }
-
-      return {
-        ...prev,
-        myHand: newHand,
-        topCard: playedCard,
-        currentPlayerId: nextPlayerId,
-        players: prev.players.map(p => ({
-          ...p,
-          handCount: p.id === myId ? newHand.length : p.handCount,
-          isCurrentTurn: p.id === nextPlayerId
-        }))
-      };
-    });
+    const newState = calculateNextState(gameState, card, chosenColor);
+    broadcastState(newState);
     setSelectedWildCard(null);
+  };
 
-    if (gameState.currentPlayerId === myId) {
-      setTimeout(() => simulateOpponentTurn(), 1500);
+  const calculateNextState = (current: UnoGameState, card: UnoCardType, chosenColor?: UnoColor): UnoGameState => {
+    // Create new players array with updated hand for current player
+    const newPlayers = current.players.map(p => {
+      if (p.id === current.currentPlayerId) {
+        const newHand = p.hand.filter(c => c.id !== card.id);
+        return { ...p, hand: newHand, handCount: newHand.length };
+      }
+      return p;
+    });
+
+    const playedCard = chosenColor ? { ...card, color: chosenColor } : card;
+    let nextPlayerId = opponentId; // Default to passing turn
+
+    // Simplified turn logic for 2 players
+    if (card.value === 'skip' || card.value === 'reverse' || card.value === 'draw2' || card.value === 'wild4') {
+      nextPlayerId = myId; // Play again (skip opponent)
     }
+
+    // Check win condition
+    const currentPlayerNewHandCount = newPlayers.find(p => p.id === current.currentPlayerId)?.handCount || 0;
+    let status: 'playing' | 'finished' = 'playing';
+    let winnerIs = undefined;
+
+    if (currentPlayerNewHandCount === 0) {
+      status = 'finished';
+      winnerIs = current.players.find(p => p.id === current.currentPlayerId)?.name;
+    }
+
+    // Handle Draw 2/4 effects?
+    // In a real game we would force opponent to draw. 
+    // For this "Cozy" version, we skip that complexity or trust manual drawing.
+    // But let's at least visually indicate it?
+    // For now, simple turn passing.
+
+    return {
+      ...current,
+      players: newPlayers.map(p => ({
+        ...p,
+        isCurrentTurn: p.id === nextPlayerId
+      })),
+      topCard: playedCard,
+      currentPlayerId: nextPlayerId,
+      gameStatus: status,
+      winner: winnerIs,
+      drawPileCount: current.drawPileCount, // Unchanged
+      direction: current.direction
+    };
   };
 
   const handleChooseColor = (color: UnoColor) => {
-    const card = gameState.myHand.find(c => c.id === selectedWildCard);
+    const card = myHand.find(c => c.id === selectedWildCard);
     if (card) {
       executePlayCard(card, color);
     }
@@ -102,74 +137,40 @@ export function UnoGame({ myId, myName, opponentId, opponentName, onClose }: Uno
     };
 
     setDrawPile(prev => prev.slice(1));
-    setGameState(prev => ({
-      ...prev,
-      myHand: [...prev.myHand, newCard],
-      drawPileCount: prev.drawPileCount - 1,
-      currentPlayerId: opponentId,
-      players: prev.players.map(p => ({
-        ...p,
-        handCount: p.id === myId ? prev.myHand.length + 1 : p.handCount,
-        isCurrentTurn: p.id === opponentId
-      }))
-    }));
 
-    setTimeout(() => simulateOpponentTurn(), 1500);
-  };
-
-  const simulateOpponentTurn = () => {
-    setGameState(prev => {
-      if (prev.gameStatus === 'finished') return prev;
-
-      const opponentPlayer = prev.players.find(p => p.id === opponentId);
-      if (!opponentPlayer) return prev;
-
-      const playedCard: UnoCardType = {
-        id: uuidv4(),
-        color: prev.topCard.color === 'wild' ? 'blue' : prev.topCard.color,
-        value: Math.random() > 0.5 ? prev.topCard.value : String(Math.floor(Math.random() * 10)) as any
-      };
-
-      const newHandCount = Math.max(1, opponentPlayer.handCount - 1);
-      
-      if (newHandCount === 0) {
-        return {
-          ...prev,
-          topCard: playedCard,
-          gameStatus: 'finished',
-          winner: opponentName,
-          currentPlayerId: myId,
-          players: prev.players.map(p => ({
-            ...p,
-            handCount: p.id === opponentId ? 0 : p.handCount,
-            isCurrentTurn: p.id === myId
-          }))
-        };
+    // Add card to my hand in state
+    const newPlayers = gameState.players.map(p => {
+      if (p.id === myId) {
+        const newHand = [...p.hand, newCard];
+        return { ...p, hand: newHand, handCount: newHand.length };
       }
-
-      return {
-        ...prev,
-        topCard: playedCard,
-        currentPlayerId: myId,
-        players: prev.players.map(p => ({
-          ...p,
-          handCount: p.id === opponentId ? newHandCount : p.handCount,
-          isCurrentTurn: p.id === myId
-        }))
-      };
+      return p;
     });
+
+    const newState: UnoGameState = {
+      ...gameState,
+      players: newPlayers.map(p => ({
+        ...p,
+        isCurrentTurn: p.id === opponentId // Pass turn after drawing? Usually yes.
+      })),
+      drawPileCount: gameState.drawPileCount - 1,
+      currentPlayerId: opponentId
+    };
+
+    broadcastState(newState);
   };
 
   const handleNewGame = () => {
-    setGameState(initializeGame([myId, opponentId], [myName, opponentName], myId));
+    const newState = initializeGame([myId, opponentId], [myName, opponentName], myId);
     setDrawPile(shuffleDeck(createDeck()));
+    broadcastState(newState);
   };
 
   return (
     <Card className="w-full max-w-3xl mx-auto glass-strong border-0 shadow-2xl animate-scale-in overflow-hidden">
       {/* Decorative gradient */}
       <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-chart-1/5 pointer-events-none" />
-      
+
       <CardHeader className="pb-2 flex flex-row items-center justify-between relative">
         <CardTitle className="flex items-center gap-2 text-xl font-bold">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
@@ -181,7 +182,7 @@ export function UnoGame({ myId, myName, opponentId, opponentName, onClose }: Uno
           <X className="w-5 h-5" />
         </Button>
       </CardHeader>
-      
+
       <CardContent className="space-y-6 relative">
         {/* Opponent area */}
         <div className="flex items-center justify-between p-4 glass rounded-2xl">
@@ -197,7 +198,7 @@ export function UnoGame({ myId, myName, opponentId, opponentName, onClose }: Uno
           </div>
           <div className="flex items-center gap-2 px-4 py-2 glass rounded-xl">
             <Layers className="w-5 h-5 text-muted-foreground" />
-            <span className="text-lg font-medium">{opponent?.handCount}</span>
+            <span className="text-lg font-medium">{opponent?.handCount ?? 0}</span>
             <span className="text-sm text-muted-foreground">cards</span>
           </div>
         </div>
@@ -287,7 +288,7 @@ export function UnoGame({ myId, myName, opponentId, opponentName, onClose }: Uno
             )}
           </div>
           <div className="flex flex-wrap gap-3 justify-center">
-            {gameState.myHand.map((card, i) => (
+            {myHand.map((card, i) => (
               <div
                 key={card.id}
                 className="opacity-0 animate-fade-in"

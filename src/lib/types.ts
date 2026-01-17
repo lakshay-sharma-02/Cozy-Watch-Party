@@ -15,7 +15,7 @@ export interface Participant {
 }
 
 // Synchronization message types
-export type SyncMessageType = 
+export type SyncMessageType =
   | 'play'
   | 'pause'
   | 'seek'
@@ -32,7 +32,7 @@ export interface SyncMessage {
 
 // Uno game types
 export type UnoColor = 'red' | 'blue' | 'green' | 'yellow' | 'wild';
-export type UnoValue = 
+export type UnoValue =
   | '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
   | 'skip' | 'reverse' | 'draw2' | 'wild' | 'wild4';
 
@@ -47,6 +47,7 @@ export interface UnoPlayer {
   name: string;
   handCount: number;
   isCurrentTurn: boolean;
+  hand: UnoCard[]; // Shared state includes all hands for this simple implementation
 }
 
 export interface UnoGameState {
@@ -55,12 +56,13 @@ export interface UnoGameState {
   topCard: UnoCard;
   direction: 1 | -1;
   drawPileCount: number;
-  myHand: UnoCard[];
+  drawPileCount: number;
+  // myHand removed, derived from players array
   gameStatus: 'waiting' | 'playing' | 'finished';
   winner?: string;
 }
 
-export type UnoAction = 
+export type UnoAction =
   | { type: 'play-card'; cardId: string; chosenColor?: UnoColor }
   | { type: 'draw-card' }
   | { type: 'say-uno' }

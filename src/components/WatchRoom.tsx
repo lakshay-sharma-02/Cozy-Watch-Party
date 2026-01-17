@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { VideoCall } from './VideoCall';
 import { UnoGame } from './UnoGame';
 import { Button } from '@/components/ui/button';
@@ -6,10 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import { 
-  Gamepad2, 
-  Copy, 
-  Check, 
+import {
+  Gamepad2,
+  Copy,
+  Check,
   AlertCircle,
   Info,
   Users,
@@ -19,6 +19,8 @@ import {
   Heart
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
+import { useSocket } from '@/context/SocketContext';
+import SimplePeer from 'simple-peer';
 
 interface WatchRoomProps {
   roomId: string;
@@ -37,7 +39,12 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
   const [showUnoGame, setShowUnoGame] = useState(false);
   const [copied, setCopied] = useState(false);
   const [participantConnected, setParticipantConnected] = useState(false);
+  const [remoteId, setRemoteId] = useState<string | null>(null);
+  const [remoteName, setRemoteName] = useState<string | null>(null);
   const [myId] = useState(() => uuidv4());
+
+  const socket = useSocket();
+  const peerRef = useRef<SimplePeer.Instance | null>(null);
 
   useEffect(() => {
     const initMedia = async () => {
@@ -47,10 +54,93 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
           audio: true
         });
         setLocalStream(stream);
+
         toast({
           title: '✨ Camera ready',
           description: 'Your camera and microphone are connected.'
         });
+
+        if (socket) {
+          socket.emit('join-room', { roomId, userName });
+
+          socket.on('user-connected', ({ userId, userName: remoteName }) => {
+            console.log('User connected, initiating call to', userId);
+            setParticipantConnected(true);
+            setRemoteId(userId);
+            setRemoteName(remoteName);
+
+            // Initiator
+            const peer = new SimplePeer({
+              initiator: true,
+              trickle: false,
+              stream: stream,
+            });
+
+            peer.on('signal', (signal) => {
+              socket.emit('offer', { roomId, offer: signal, senderName: userName });
+            });
+
+            peer.on('stream', (remoteStream) => {
+              setRemoteStream(remoteStream);
+            });
+
+            peerRef.current = peer;
+
+            toast({
+              title: 'Friend connected!',
+              description: `${remoteName} has joined the party.`,
+            });
+          });
+
+          socket.on('offer', ({ offer, senderName, senderId }) => {
+            console.log('Received offer from', senderName);
+            setParticipantConnected(true);
+            setRemoteId(senderId);
+            setRemoteName(senderName);
+
+            // Receiver
+            const peer = new SimplePeer({
+              initiator: false,
+              trickle: false,
+              stream: stream,
+            });
+
+            peer.on('signal', (signal) => {
+              socket.emit('answer', { roomId, answer: signal });
+            });
+
+            peer.on('stream', (remoteStream) => {
+              setRemoteStream(remoteStream);
+            });
+
+
+            peer.signal(offer);
+            peerRef.current = peer;
+
+            toast({
+              title: 'Friend connected!',
+              description: `${senderName} has joined the party.`,
+            });
+          });
+
+          socket.on('answer', ({ answer }) => {
+            console.log('Received answer');
+            peerRef.current?.signal(answer);
+          });
+
+          socket.on('user-disconnected', () => {
+            setParticipantConnected(false);
+            setRemoteStream(null);
+            peerRef.current?.destroy();
+            peerRef.current = null;
+            toast({
+              title: 'Friend disconnected',
+              description: 'The other user has left the room.',
+              variant: 'destructive',
+            });
+          });
+        }
+
       } catch (err) {
         console.error('Failed to get media devices:', err);
         toast({
@@ -60,42 +150,39 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
         });
       }
     };
-    initMedia();
+
+    if (socket) {
+      initMedia();
+    }
 
     return () => {
       localStream?.getTracks().forEach(track => track.stop());
       screenStream?.getTracks().forEach(track => track.stop());
+      peerRef.current?.destroy();
+      socket?.off('user-connected');
+      socket?.off('offer');
+      socket?.off('answer');
+      socket?.off('user-disconnected');
     };
-  }, []);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      if (!participantConnected) {
-        setParticipantConnected(true);
-        toast({
-          title: '🎉 Friend connected!',
-          description: 'Your watch party is ready to start.'
-        });
-      }
-    }, 3000);
-    return () => clearTimeout(timeout);
-  }, [participantConnected]);
+  }, [socket, roomId, userName]);
 
   const handleToggleVideo = useCallback(() => {
     if (localStream) {
-      localStream.getVideoTracks().forEach(track => {
-        track.enabled = !track.enabled;
-      });
-      setVideoEnabled(prev => !prev);
+      const videoTrack = localStream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled;
+        setVideoEnabled(videoTrack.enabled);
+      }
     }
   }, [localStream]);
 
   const handleToggleAudio = useCallback(() => {
     if (localStream) {
-      localStream.getAudioTracks().forEach(track => {
-        track.enabled = !track.enabled;
-      });
-      setAudioEnabled(prev => !prev);
+      const audioTrack = localStream.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        setAudioEnabled(audioTrack.enabled);
+      }
     }
   }, [localStream]);
 
@@ -104,9 +191,16 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
       screenStream?.getTracks().forEach(track => track.stop());
       setScreenStream(null);
       setIsScreenSharing(false);
+
+      if (peerRef.current && localStream) {
+        const videoTrack = localStream.getVideoTracks()[0];
+        const sender = (peerRef.current as any)._pc.getSenders().find((s: any) => s.track.kind === 'video');
+        if (sender) sender.replaceTrack(videoTrack);
+      }
+
       toast({
         title: 'Screen sharing stopped',
-        description: 'Your screen is no longer being shared.'
+        description: 'Switched back to camera.'
       });
     } else {
       try {
@@ -114,30 +208,32 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
           video: true,
           audio: true
         });
-        
-        stream.getVideoTracks()[0].onended = () => {
-          setScreenStream(null);
-          setIsScreenSharing(false);
+
+        const screenTrack = stream.getVideoTracks()[0];
+        screenTrack.onended = () => {
+          handleToggleScreenShare();
         };
-        
+
         setScreenStream(stream);
         setIsScreenSharing(true);
+
+        if (peerRef.current) {
+          const sender = (peerRef.current as any)._pc.getSenders().find((s: any) => s.track.kind === 'video');
+          if (sender) sender.replaceTrack(screenTrack);
+        }
+
         toast({
           title: '🖥️ Screen sharing started',
           description: 'Your friend can now see your screen!'
         });
       } catch (err) {
         console.error('Failed to share screen:', err);
-        toast({
-          title: 'Screen share failed',
-          description: 'Could not start screen sharing.',
-          variant: 'destructive'
-        });
       }
     }
-  }, [isScreenSharing, screenStream]);
+  }, [isScreenSharing, screenStream, localStream]);
 
   const handleEndCall = () => {
+    socket?.disconnect();
     localStream?.getTracks().forEach(track => track.stop());
     screenStream?.getTracks().forEach(track => track.stop());
     onLeave();
@@ -158,7 +254,7 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
       {/* Background effects */}
       <div className="fixed inset-0 bg-[radial-gradient(ellipse_at_top_left,hsl(var(--primary)/0.08),transparent_50%)] pointer-events-none" />
       <div className="fixed inset-0 bg-[radial-gradient(ellipse_at_bottom_right,hsl(var(--chart-1)/0.05),transparent_50%)] pointer-events-none" />
-      
+
       {/* Header */}
       <header className="sticky top-0 z-40 border-b border-border/50 glass">
         <div className="container flex h-18 items-center justify-between px-4">
@@ -184,9 +280,9 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
               </button>
             </div>
           </div>
-          
+
           <div className="flex items-center gap-3">
-            <Badge 
+            <Badge
               variant={isHost ? 'default' : 'secondary'}
               className={cn(
                 'rounded-lg px-3 py-1',
@@ -235,7 +331,7 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
           <div className="lg:col-span-2 animate-fade-in-up stagger-1">
             <VideoCall
               localStream={localStream}
-              remoteStream={participantConnected ? localStream : null}
+              remoteStream={remoteStream}
               screenStream={screenStream}
               isScreenSharing={isScreenSharing}
               onToggleVideo={handleToggleVideo}
@@ -244,7 +340,7 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
               onEndCall={handleEndCall}
               videoEnabled={videoEnabled}
               audioEnabled={audioEnabled}
-              participantName={isHost ? 'Friend' : 'Host'}
+              participantName={participantConnected ? (isHost ? 'Guest' : 'Host') : 'Waiting...'}
             />
           </div>
 
@@ -282,8 +378,8 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
                 <div className="flex items-center gap-4">
                   <div className={cn(
                     'w-4 h-4 rounded-full transition-all duration-500',
-                    participantConnected 
-                      ? 'bg-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.5)]' 
+                    participantConnected
+                      ? 'bg-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.5)]'
                       : 'bg-muted animate-pulse'
                   )} />
                   <div>
@@ -291,7 +387,7 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
                       {participantConnected ? 'Connected' : 'Waiting for friend...'}
                     </p>
                     <p className="text-sm text-muted-foreground">
-                      {participantConnected 
+                      {participantConnected
                         ? '✨ Your watch party is live!'
                         : 'Share the room code with your friend'
                       }
@@ -306,7 +402,7 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
               <CardContent className="flex items-start gap-3 py-3">
                 <AlertCircle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Only share content you have the right to share. 
+                  Only share content you have the right to share.
                   Respect copyright and streaming service terms of use.
                 </p>
               </CardContent>
@@ -318,10 +414,11 @@ export function WatchRoom({ roomId, userName, isHost, onLeave }: WatchRoomProps)
         {showUnoGame && (
           <div className="fixed inset-0 z-50 bg-background/90 backdrop-blur-xl flex items-center justify-center p-4 animate-fade-in">
             <UnoGame
+              roomId={roomId}
               myId={myId}
               myName={userName}
-              opponentId="opponent-demo"
-              opponentName={isHost ? 'Friend' : 'Host'}
+              opponentId={remoteId || 'opponent-demo'}
+              opponentName={remoteName || (participantConnected ? (isHost ? 'Guest' : 'Host') : 'Waiting...')}
               onClose={() => setShowUnoGame(false)}
             />
           </div>
